@@ -1,0 +1,17 @@
+﻿\documentclass{article}
+\usepackage[margin=0.3in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{courier}
+\pagestyle{empty}
+\begin{document}
+\small\ttfamily
+private String generateSessionToken() \{\\
+\ \ \ \ Random random = new Random();\\
+\ \ \ \ StringBuilder sb = new StringBuilder(16);\\
+\ \ \ \ for (int i = 0; i < 16; i++) \{\\
+\ \ \ \ \ \ \ \ sb.append("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"\\
+\ \ \ \ \ \ \ \ \ \ \ \ .charAt(random.nextInt(62)));\\
+\ \ \ \ \}\\
+\ \ \ \ return sb.toString();\\
+\}
+\end{document}
