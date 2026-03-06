@@ -1,0 +1,98 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{times}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\setlength{\columnsep}{0.25in}
+\setlength{\parindent}{1em}
+\setlist[itemize]{leftmargin=*,topsep=2pt,itemsep=1pt}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=blue,citecolor=black}
+
+\title{INFO5995 Assignment 2 Part A: Network Security Analysis of \texttt{a2\_case1.apk}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+This report analyzes the provided Android APK \texttt{a2\_case1.apk} with a network-security focus. Static analysis shows that the application explicitly permits cleartext transport, loads remote content over HTTP inside a WebView, and ignores TLS validation failures. Combined, these behaviors create a practical man-in-the-middle risk for any on-path attacker on the same network. The report documents the decompilation workflow, a simple threat model, concrete code evidence, realistic impact, and mitigations.
+\end{abstract}
+
+\section{Decompilation Workflow}
+The APK was first inspected as a ZIP archive to confirm the presence of \texttt{AndroidManifest.xml} and \texttt{classes.dex}. It was then decompiled with \texttt{jadx 1.5.5}, which recovered decoded resources and Java source. This exposed the launcher activity \texttt{com.example.mastg\_test0019.MainActivity}, the layout resources, and the network-facing WebView logic. Dynamic execution was not completed in the current environment, so the findings below are based on reproducible static evidence.
+
+\section{App Summary}
+The application is labelled \texttt{MASTG-TEST0019}. Its UI text explicitly references testing data encryption on the network, and the main screen embeds a \texttt{WebView}. When the launcher activity starts, it loads remote content into that WebView. Therefore, the critical trust boundary is the network path between the Android device and the remote server.
+
+\section{System and Threat Model}
+The relevant components are the Android user, the application, the remote server \texttt{www.example.com}, and an on-path attacker such as someone on the same Wi-Fi or LAN. The attacker's goal is to observe or modify the traffic exchanged between the app and the remote endpoint. The app's goal should be confidential and authenticated transport of the content rendered in the WebView.
+
+\noindent\textbf{Threat model summary.}
+\begin{itemize}
+  \item User launches the app, which renders remote content inside a WebView.
+  \item The app communicates with a remote server over the network.
+  \item An on-path attacker can intercept, block, or modify traffic.
+  \item The main security objective is transport confidentiality and integrity.
+\end{itemize}
+
+\section{Vulnerability Evidence}
+The app contains several concrete indicators of insecure transport behavior.
+
+\begin{itemize}
+  \item In \texttt{AndroidManifest.xml}, the application sets \texttt{android:usesCleartextTraffic="true"}. This explicitly permits plaintext HTTP traffic.
+  \item In \texttt{MainActivity.java}, the app executes \texttt{webView.loadUrl("http://www.example.com")}. The initial content load is therefore cleartext.
+  \item The custom \texttt{WebViewClient} overrides \texttt{onReceivedSslError(...)} and calls \texttt{sslErrorHandler.proceed()}. This tells the WebView to ignore TLS certificate failures.
+  \item The class also instantiates a \texttt{HostnameVerifier} that returns \texttt{true} for any hostname, indicating a permissive validation pattern.
+\end{itemize}
+
+\noindent The most relevant code evidence is shown below.
+
+\begin{quote}
+\small
+\texttt{AndroidManifest.xml:26} \\
+\texttt{android:usesCleartextTraffic="true"} \\
+\texttt{MainActivity.java:34--35} \\
+\texttt{sslErrorHandler.proceed();} \\
+\texttt{MainActivity.java:38} \\
+\texttt{webView.loadUrl("http://www.example.com");} \\
+\texttt{MainActivity.java:41--42} \\
+\texttt{return true;}
+\normalsize
+\end{quote}
+
+\section{Analysis}
+These behaviors combine into a straightforward man-in-the-middle vulnerability. First, cleartext transport is allowed globally in the manifest. Second, the app immediately loads a remote page over HTTP. As a result, any on-path attacker can read or alter the traffic before it reaches the device. The attacker can inject arbitrary HTML or JavaScript, rewrite page content, force redirects, or display phishing content inside the trusted app context.
+
+Even if the URL were later changed from HTTP to HTTPS, the TLS handling would still be unsafe. The code explicitly bypasses certificate failures through \texttt{sslErrorHandler.proceed()}, and the permissive hostname verifier shows the same implementation mindset: server identity checks are treated as optional. This removes the authenticity guarantees that TLS is supposed to provide.
+
+\section{Impact}
+A realistic attack scenario is a victim using the app on public Wi-Fi, a hostile hotspot, or any network controlled by an adversary. When the app requests \texttt{http://www.example.com}, the attacker can intercept and modify the response. The attacker can present forged content, imitate login or support workflows, capture information typed into forms, or manipulate the information shown to the user.
+
+The worst-case impact includes disclosure of viewed content, malicious content injection inside the WebView, phishing for credentials or session data, and complete loss of transport integrity. The issue is significant because it affects the app's main remote content path and requires only network position, not device compromise.
+
+\section{Mitigations}
+The transport stack should be tightened in several places.
+
+\begin{itemize}
+  \item Set \texttt{android:usesCleartextTraffic="false"} and, if required, define a restrictive Network Security Configuration.
+  \item Replace the HTTP endpoint with HTTPS only, and reject non-TLS URLs before loading them into the WebView.
+  \item Do not call \texttt{sslErrorHandler.proceed()}; cancel the request when certificate validation fails.
+  \item Use the platform's default hostname verification rather than accepting all hostnames.
+  \item Optionally restrict WebView loading to an allowlist of trusted domains.
+\end{itemize}
+
+These changes restore both confidentiality and authenticity. Enforcing HTTPS prevents passive observation of traffic, while correct certificate and hostname validation prevents active impersonation by an on-path attacker.
+
+\section{Conclusion}
+The provided APK demonstrates a combined insecure-transport flaw rather than an isolated coding mistake. The app permits cleartext traffic, loads a remote page over HTTP, and ignores TLS validation failures. Together, these choices make the application's network content vulnerable to interception and modification by a man-in-the-middle attacker. The issue can be mitigated by enforcing HTTPS, disabling cleartext traffic, and restoring proper TLS validation.
+
+\end{document}
